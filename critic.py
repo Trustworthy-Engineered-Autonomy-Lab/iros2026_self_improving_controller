@@ -21,6 +21,40 @@ NUM_EPOCHS = 100
 RESULT_FOLDER = "critic_%Y_%m_%d_%H_%M_%S"
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
 
+
+class CriticDataset(TensorDataset):
+    def __init__(self, *tensors, expand_times = 1, label_scheme = 'binary'):
+        super().__init__(*tensors)
+        self._expend_times = expand_times
+        self._label_scheme = label_scheme
+
+    def _make_label(self, steer, positive):
+        if self._label_scheme == 'binary':
+            if positive:
+                label = torch.ones_like(steer)
+            else:
+                label = torch.zeros_like(steer)
+        else:
+            raise ValueError(f"Unsupported label scheme {self._label_scheme}")
+
+        return label
+
+    def __len__(self):
+        return super().__len__() * (1 + self._expend_times)
+    
+    def __getitem__(self, index):
+        original_len = super().__len__()
+        if index < original_len:
+            image, steer = super().__getitem__(index)
+            label = self._make_label(steer, True)
+        else:
+            image, steer = super().__getitem__(index % original_len)
+            steer = torch.rand_like(steer) * 2 - 1
+            label = self._make_label(steer, False)
+        
+        return image, steer, label
+
+
 class Critic(nn.Module):
     """
     CNN using kernel sizes from the diagram:
@@ -121,23 +155,22 @@ def train(
         model: nn.Module,
         images: torch.Tensor,
         steers: torch.Tensor,
-        labels: torch.Tensor,
         device = DEVICE,
         batch_size = BATCH_SIZE,
         nepochs = NUM_EPOCHS,
         lr = LEARNING_RATE,
         weight_decay = WEIGHT_DECAY,
+        dataset_config = {}
     ):
 
     device = torch.device(device)
 
     images = images.to(device, torch.float32)
     steers = steers.to(device, torch.float32)
-    labels = labels.to(device, torch.float32)
 
     model = model.to(device)
 
-    dataset = TensorDataset(images, steers, labels)
+    dataset = CriticDataset(images, steers, **dataset_config)
     train_size = int(0.8 * len(dataset))
     val_size   = len(dataset) - train_size
     train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
@@ -159,55 +192,6 @@ def train(
         pbar.set_postfix(train_loss=f"{train_loss:.4f}", val_loss=f"{val_loss:.4f}")
 
         yield train_loss, val_loss
-
-def _generate_data(data, source, times = 1, method = 'uniform'):
-    images = data[source]['image']
-    steers = data[source]['steer']
-
-    gen_images = np.broadcast_to(images, (times * images.shape[0], *images.shape[1:]))
-    if method == 'uniform':
-        gen_steers = np.random.rand(times * steers.shape[0]) * 2 -1
-    else:
-        raise ValueError(f"Unsupported method {method}")
-    
-    return {
-        'image': gen_images,
-        'steer': gen_steers
-    }
-
-def generate_data(data: dict, config: dict):
-    gen_data = {}
-    for k,v in config.items():
-        gen_data[k] = _generate_data(data, **v)
-    return gen_data
-
-def construct_label(positive_data: dict, negitive_data: dict, scheme = 'binary'):
-    if scheme == 'binary':
-        labels = np.concatenate([np.ones_like(positive_data['steer']), np.zeros_like(negitive_data['steer'])])
-    else:
-        raise ValueError(f"Unknown label scheme {scheme}")
-    
-    return labels
-        
-def construct_critic_data(data, config: dict):
-    data_config = config.get('data', {})
-    positive_config = data_config.get('positive', {})
-    negative_config = data_config.get('negative', {})
-
-    print("Constructing positive data")
-    positive_data = construct_data(data, positive_config)
-    print("Constructing negative data")
-    negative_data = construct_data(data, negative_config)
-
-    label_config = config.get('label', {})
-    print("Constructing labels")
-    labels = construct_label(positive_data, negative_data, **label_config)
-
-    return {
-        'image' : np.concatenate([positive_data['image'], negative_data['image']]),
-        'steer' : np.concatenate([positive_data['steer'], negative_data['steer']]),
-        'label' : labels
-    }
     
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -233,20 +217,13 @@ if __name__ == '__main__':
         sys.exit(1)
 
     try:
-        data = data | generate_data(data, config.get('generate_data', {}))
-    except Exception as e:
-        print(f"Failed to generate training data: {e}")
-        sys.exit(1)
-
-    try:
-        training_data = construct_critic_data(data, config['training_data'])
-        images = torch.from_numpy(training_data['image'])
-        steers = torch.from_numpy(training_data['steer']).unsqueeze(1)
-        labels = torch.from_numpy(training_data['label']).unsqueeze(1)
-
+        training_data = construct_data(data, config.get('training_data', {}))
     except Exception as e:
         print(f"Failed to construct training data: {e}")
         sys.exit(1)
+
+    images = torch.from_numpy(training_data['image'])
+    steers = torch.from_numpy(training_data['steer']).unsqueeze(1)
 
     model = Critic()
     
@@ -262,7 +239,6 @@ if __name__ == '__main__':
         model,
         images,
         steers,
-        labels,
         **train_config
     ),1):
 

@@ -5,7 +5,7 @@
             "lr" : 5e-4,
             "batch_size": 256,
             "lam" : 1,
-            "nepochs": 10
+            "nepochs": 100
         },
         "rc_threshold" : 0.5
     },
@@ -22,7 +22,16 @@
         }
     },
     "critic" : {
-        "model_path" : "runs/critic/2026_01_22_10_53_43/best.pt",
+        "train" : {
+            "batch_size" : 256,
+            "lr" : 0.0005,
+            "weight_decay" : 1e-4,
+            "nepochs" : 100,
+            "dataset_config" : {
+                "expand_times" : 1,
+                "label_scheme" : "binary"
+            }
+        },
         "threshold" : 0.5
     },
     "result_folder" : "runs/evolve/%Y_%m_%d_%H_%M_%S"

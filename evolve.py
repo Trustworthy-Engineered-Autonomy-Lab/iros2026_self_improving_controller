@@ -7,11 +7,12 @@ import pickle
 import torch
 import numpy as np
 
-from tools.proc_collected_data import proc_collected_data
+from utils import proc_collected_data
 from tools.pt2onnx import export_onnx
 
 import cae
 from cae import CAE, normalize_image
+import critic
 from critic import Critic
 import cnn_controller
 from cnn_controller import CNN
@@ -24,7 +25,7 @@ from datetime import datetime
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
 RC_THRESHOLD = 0.5
 CRITIC_THRESHOLD = 0.5
-RESULT_FOLDER = 'runs/evolve'
+RESULT_FOLDER = 'evolve_%Y_%m_%d_%H_%M_%S'
 
 if __name__ == "__main__":
     
@@ -108,15 +109,21 @@ if __name__ == "__main__":
     #-----------------------------------------------
 
     critic_config = config.get('critic', {})
-    try:
-        critic = Critic().to(device)
-        critic.load_state_dict(torch.load(critic_config['model_path'], weights_only=True))
-    except Exception as e:
-        print(f"Failed to load critic model: {e}")
-        sys.exit(1)
+    critic_train_config = critic_config.get('train', {})
 
-    critic.eval()
-    critic_score = critic(images, steers)
+    critic_model = Critic().to(device)
+
+    for loss in critic.train(
+        critic_model,
+        images,
+        steers,
+        device,
+        **critic_train_config
+    ):
+        pass
+    
+    critic_model.eval()
+    critic_score = critic_model(images, steers)
 
     critic_threshold = critic_config.get('threshold', CRITIC_THRESHOLD)
     selected = torch.where(critic_score >= critic_threshold)[0]
