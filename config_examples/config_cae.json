@@ -1,0 +1,23 @@
+{
+    "train" : {
+        "lr": 5e-4,
+        "batch_size": 256,
+        "nepochs": 100,
+        "lam": 1
+    },
+    "eval" : {
+        "batch_size": 256
+    },
+    "record_interval": 5,
+    "load_data" : {
+        "normal" : "data/normal.pkl",
+        "hitwall" : "data/hitwall.pkl",
+        "zigzag" : "data/zigzag.pkl"
+    },
+    "training_data" : {
+        "normal" : [0,20000,1],
+        "hitwall" : [0,2000,1],
+        "zigzag" : [0,2000,1]
+    },
+    "result_folder" : "runs/cae/%Y_%m_%d_%H_%M_%S"
+}

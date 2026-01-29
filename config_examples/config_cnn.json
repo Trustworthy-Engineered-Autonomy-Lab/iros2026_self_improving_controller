@@ -1,0 +1,18 @@
+{
+    "train" : {
+        "batch_size" : 256,
+        "lr" : 0.0001,
+        "nepochs" : 200
+    },
+    "load_data" : {
+        "normal" : "data/normal.pkl",
+        "hitwall" :"data/hitwall.pkl",
+        "zigzag" : "data/zigzag.pkl"
+    },
+    "training_data" : {
+        "normal" : [1,2000,1],
+        "hitwall" : [1,250,1],
+        "zigzag" : [1,250,1]
+    },
+    "result_folder" : "runs/cnn/%Y_%m_%d_%H_%M_%S"
+}

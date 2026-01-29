@@ -1,0 +1,32 @@
+{
+    "load_data" : {
+        "normal" : "data/normal.pkl"
+    },
+    "generate_data" : {
+        "random" : {
+            "times" : 1,
+            "method" : "uniform",
+            "source" : "normal"
+        }
+    },
+    "training_data" : {
+        "data" : {
+            "positive" : {
+                "normal" : [0,20000,1]
+            },
+            "negative" : {
+                "random" : [null]
+            }
+        },
+        "labels" : {
+            "scheme" : "binary"
+        }
+    },
+    "train" : {
+        "batch_size" : 256,
+        "lr" : 0.0005,
+        "weight_decay" : 1e-4,
+        "nepochs" : 100
+    },
+    "result_folder" : "runs/critic/%Y_%m_%d_%H_%M_%S"
+}
