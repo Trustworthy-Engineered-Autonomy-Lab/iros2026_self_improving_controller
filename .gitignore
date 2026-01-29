@@ -1,0 +1,7 @@
+configs/
+data/
+logs/
+runs/
+misc/
+.vscode/
+__pycache__/
