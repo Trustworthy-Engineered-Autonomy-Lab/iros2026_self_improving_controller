@@ -46,7 +46,8 @@ if __name__ == "__main__":
     steer_list = []
     try:
         data_config = config['data']
-        for data_path in [Path(p) for p in data_config]:
+        for k,v in data_config.items():
+            data_path = Path(k)
             print(f"Loading {data_path}")
             if data_path.is_dir():
                 data = proc_collected_data(data_path)
@@ -57,8 +58,8 @@ if __name__ == "__main__":
                 print(f"Unrecognized data format {data_path.suffix}. Ignored {data_path}")
                 continue
                 
-            image_list.append(data['image'])
-            steer_list.append(data['steer'].reshape(-1,1))
+            image_list.append(data['image'][slice(*v)])
+            steer_list.append(data['steer'][slice(*v)].reshape(-1,1))
     except Exception as e:
         print(f"Failed to process collected data under {config['collected_data']}: {e}")
         sys.exit(1)
@@ -97,6 +98,10 @@ if __name__ == "__main__":
     rc, mse = cae.eval(cae_model, normalized_images, device)
 
     rc_threshold = cae_config.get('rc_threshold', RC_THRESHOLD)
+    if isinstance(rc_threshold, str):
+        rc_threshold = eval(rc_threshold, {}, {'mean' : torch.mean(rc), 'stdev': torch.std(rc)})
+        print(f"RC threshold is {rc_threshold:.2f}")
+    
     selected = torch.where(rc >= rc_threshold)[0]
 
     n_removed = images.shape[0] - len(selected)
@@ -104,7 +109,7 @@ if __name__ == "__main__":
     images = images[selected]
     steers = steers[selected]
 
-    print(f"Removed {n_removed} images whose rc value < {rc_threshold}")
+    print(f"Removed {n_removed} images whose rc value < {rc_threshold:.2f}")
 
     #-----------------------------------------------
 
@@ -133,7 +138,7 @@ if __name__ == "__main__":
     images = images[selected]
     steers = steers[selected]
 
-    print(f"Removed {n_removed} images whose critic score < {critic_threshold}")
+    print(f"Removed {n_removed} images whose critic score < {critic_threshold:.2f}")
 
     with open(result_folder / 'cleaned_data.pkl', 'wb') as f:
         pickle.dump({

@@ -1,5 +1,9 @@
 {
-    "data" : ["data/collected/normal", "data/normal.pkl"],
+    "data" : {
+        "data/normal.pkl" : [1,2000,1], 
+        "data/hitwall.pkl" : [1,500,1],
+        "data/zigzag.pkl" : [1,500,1]
+    },
     "cae" : {
         "train" : {
             "lr" : 5e-4,
@@ -7,7 +11,7 @@
             "lam" : 1,
             "nepochs": 100
         },
-        "rc_threshold" : 0.5
+        "rc_threshold" : "mean"
     },
     "cnn" : {
         "train" : {
