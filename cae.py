@@ -30,13 +30,10 @@ class IndexedTensorDataset(TensorDataset):
     def __getitem__(self, idx):
         data = super().__getitem__(idx)
         return (*data, idx)
-    
-# CAE model
-class CAE(nn.Module):
+
+class ImageEncoder(nn.Sequential):
     def __init__(self):
-        super(CAE, self).__init__()
-        
-        self.encoder = nn.Sequential(
+        super().__init__(
             nn.Conv2d(3, 16, 3, stride=2, padding=1),
             nn.BatchNorm2d(16),
             nn.ReLU(True),
@@ -48,38 +45,44 @@ class CAE(nn.Module):
             nn.Conv2d(32, 64, 3, stride=2, padding=1),
             nn.BatchNorm2d(64),
             nn.ReLU(True),
-        )
-        self.encoder_fc = nn.Sequential(
+
             nn.Flatten(),
             nn.Linear(64 * 18 * 28, 256),
             nn.ReLU(True)
         )
 
-        self.decoder_fc = nn.Sequential(
+class ImageDecoder(nn.Sequential):
+    def __init__(self):
+        super().__init__(
             nn.Linear(256, 64 * 18 * 28),
-            nn.ReLU(True)
-        )
-        self.decoder = nn.Sequential(
+            nn.ReLU(True),
+            nn.Unflatten(1, (64, 18, 28)),
+
             nn.ConvTranspose2d(64, 32, 3, stride=2, padding=1, output_padding=1),
             nn.BatchNorm2d(32),
             nn.ReLU(True),
+
             nn.ConvTranspose2d(32, 16, 3, stride=2, padding=1, output_padding=1),
             nn.BatchNorm2d(16),
             nn.ReLU(True),
+
             nn.ConvTranspose2d(16, 3, 3, stride=2, padding=1, output_padding=1),
             nn.Sigmoid()
         )
 
+    
+# CAE model
+class CAE(nn.Module):
+    def __init__(self):
+        super(CAE, self).__init__()
+        
+        self.encoder = ImageEncoder()
+        self.decoder = ImageDecoder()
+
     def forward(self, x: torch.Tensor):
          
-        x_enc = self.encoder(x)
-        batch_size = x.size(0)
-        x_flat = x_enc.contiguous().view(batch_size, -1)
-        latent = self.encoder_fc(x_flat)  
-
-        x_dec_fc = self.decoder_fc(latent)
-        x_dec = x_dec_fc.view(batch_size, 64, 18, 28)
-        x_recon = self.decoder(x_dec)
+        latent = self.encoder(x)
+        x_recon = self.decoder(latent)
 
         return x_recon, latent
 
