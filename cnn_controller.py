@@ -5,13 +5,12 @@ import pickle
 import numpy as np
 from pathlib import Path
 from datetime import datetime
-import matplotlib.pyplot as plt
 
 import torch
 import torch.nn as nn
 from torch.utils.data import TensorDataset, DataLoader, random_split
 
-from utils import load_data, EarlyStopCriterion
+from utils import load_data, plot_loss_curve, EarlyStopCriterion
 
 from tqdm import tqdm
 
@@ -220,18 +219,7 @@ if __name__ == "__main__":
         train_loss_list.append(train_loss)
         val_loss_list.append(val_loss)
 
-    fig, ax = plt.subplots()
-
-    ax.plot(range(len(train_loss_list)), train_loss_list, '-*', label="Train")
-    ax.plot(range(len(val_loss_list)), val_loss_list, '-.', label="Validation")
-    ax.set_xlabel("Epoch")
-    ax.set_ylabel("Loss")
-    ax.set_title("Training / Validation Loss")
-    ax.legend()
-    ax.grid(True)
-
-    fig.tight_layout()
+    fig, ax = plot_loss_curve(train_loss_list, val_loss_list)
     fig.savefig(result_folder / "loss_curve.png", dpi=200)
-    plt.close(fig)   # <-- important to prevent memory buildup
 
 

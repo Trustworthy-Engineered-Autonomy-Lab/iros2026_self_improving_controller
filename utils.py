@@ -4,6 +4,17 @@ import pandas
 import cv2
 import numpy as np
 
+from torch.utils.data import TensorDataset
+import torch
+
+import matplotlib.pyplot as plt
+
+def normalize_image(img: torch.Tensor):
+    x_min = img.min()
+    x_max = img.max()
+    img_norm = (img - x_min) / (x_max - x_min + 1e-8) 
+    return img_norm.to(torch.float32)
+
 def proc_collected_data(data_folder):
     data_path = Path(data_folder)
     csv = pandas.read_csv(data_path / 'labels.csv')
@@ -50,6 +61,22 @@ def construct_data(data: dict, config: dict):
         'image' : np.concatenate(image_list),
         'steer' : np.concatenate(steer_list)
     }
+
+def plot_loss_curve(train_loss, val_loss):
+
+    fig, ax = plt.subplots()
+
+    ax.plot(range(len(train_loss)), train_loss, '-*', label="Train")
+    ax.plot(range(len(val_loss)), val_loss, '-.', label="Validation")
+    ax.set_xlabel("Epoch")
+    ax.set_ylabel("Loss")
+    ax.set_title("Training / Validation Loss")
+    ax.legend()
+    ax.grid(True)
+
+    fig.tight_layout()
+
+    return fig, ax
     
 
 class EarlyStopCriterion:
@@ -68,3 +95,12 @@ class EarlyStopCriterion:
             save_model += 1
 
         return save_model == 2
+    
+# 评估数据集和数据加载器（不打乱顺序，并返回索引）
+class IndexedTensorDataset(TensorDataset):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def __getitem__(self, idx):
+        data = super().__getitem__(idx)
+        return (*data, idx)

@@ -4,32 +4,16 @@ import torch
 import torch.nn as nn
 from torch.utils.data import TensorDataset, DataLoader, Dataset
 from datetime import datetime
+from utils import IndexedTensorDataset
 
 import json
 import argparse
 from pathlib import Path
 from datetime import datetime
 
-from utils import load_data
-
-from typing import Union
+from utils import load_data, normalize_image
 
 from tqdm import tqdm
-
-def normalize_image(img: torch.Tensor):
-    x_min = img.min()
-    x_max = img.max()
-    img_norm = (img - x_min) / (x_max - x_min + 1e-8) 
-    return img_norm.to(torch.float32)
-
-# 评估数据集和数据加载器（不打乱顺序，并返回索引）
-class IndexedTensorDataset(TensorDataset):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-
-    def __getitem__(self, idx):
-        data = super().__getitem__(idx)
-        return (*data, idx)
 
 class ImageEncoder(nn.Sequential):
     def __init__(self):
@@ -69,7 +53,6 @@ class ImageDecoder(nn.Sequential):
             nn.ConvTranspose2d(16, 3, 3, stride=2, padding=1, output_padding=1),
             nn.Sigmoid()
         )
-
     
 # CAE model
 class CAE(nn.Module):
@@ -88,8 +71,6 @@ class CAE(nn.Module):
 
 LEARNING_RATE = 5e-4
 BATCH_SIZE = 256  
-CLEAN_NUM = 16000
-ANOMALY_NUM = 1600
 
 NUM_EPOCHS = 100
 RECORD_INTERVAL = 5
@@ -152,10 +133,10 @@ def eval (
         device = DEVICE,
         batch_size = BATCH_SIZE
     ):
-    images = images.to(device)
+    images = images.to(device, torch.float32)
     model = model.to(device)
 
-    eval_dataset = IndexedTensorDataset(images.to(device, torch.float32))
+    eval_dataset = IndexedTensorDataset(images)
     eval_loader = DataLoader(eval_dataset, batch_size=batch_size, shuffle=False)
 
     rc, mse, indices = eval_epoch(model, eval_loader)
@@ -176,7 +157,7 @@ def train (
         nepochs = NUM_EPOCHS,
         lr = LEARNING_RATE
     ):
-    images = images.to(device)
+    images = images.to(device, torch.float32)
     model = model.to(device)
 
     train_dataset = TensorDataset(images)
@@ -187,7 +168,7 @@ def train (
 
     all_indices = np.arange(len(images))
     reference_indices = np.random.choice(all_indices, size=len(images) // 50, replace=False)
-    reference_images = images[reference_indices].to(device)
+    reference_images = images[reference_indices]
 
     model.eval()
     with torch.no_grad():
@@ -261,7 +242,6 @@ if __name__ == "__main__":
         print(f"Failed to construct training data: {e}")
         sys.exit(1)
 
-    result_folder.mkdir(parents=True, exist_ok=True)
     images_tensor = torch.from_numpy(np.concatenate(image_list))
     images_tensor = normalize_image(images_tensor.to(DEVICE)).permute(0,3,1,2)
 
@@ -273,8 +253,7 @@ if __name__ == "__main__":
     eval_config = config.get('eval', {})
                 
     # 创建结果目录
-    result_path = result_folder
-    result_path.mkdir(parents=True, exist_ok=True)
+    result_folder.mkdir(parents=True, exist_ok=True)
 
     model = CAE()
 
@@ -298,9 +277,11 @@ if __name__ == "__main__":
             tqdm.write(f"Saved record in epoch {epoch}")
 
     # 保存所有记录到文件
-    np.save(result_path / 'loss_records.npy', np.array(loss_records))
-    np.save(result_path / 'mse_loss_records.npy', mse_loss_records)
-    np.save(result_path / 'rc_records.npy', rc_records)
-    print(f"Results are saved to {result_path}")
+    np.save(result_folder / 'loss_records.npy', loss_records)
+    np.save(result_folder / 'mse_loss_records.npy', mse_loss_records)
+    np.save(result_folder / 'rc_records.npy', rc_records)
+    torch.save(model.encoder.state_dict(), result_folder / 'encoder.pt')
+    torch.save(model.decoder.state_dict(), result_folder / 'decoder.pt')
+    print(f"Results are saved to {result_folder}")
 
         
