@@ -97,6 +97,12 @@ if __name__ == "__main__":
 
     rc, mse = cae.eval(cae_model, normalized_images, device)
 
+    with open(result_folder / 'rc_record.pkl', 'wb') as f:
+        pickle.dump(rc, f)
+
+    with open(result_folder / 'mse_record.pkl', 'wb') as f:
+        pickle.dump(mse, f)
+
     rc_threshold = cae_config.get('rc_threshold', RC_THRESHOLD)
     if isinstance(rc_threshold, str):
         rc_threshold = eval(rc_threshold, {}, {'mean' : torch.mean(rc), 'stdev': torch.std(rc)})
