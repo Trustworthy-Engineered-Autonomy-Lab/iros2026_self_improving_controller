@@ -22,17 +22,24 @@ DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
 
 
 class CriticDataset(TensorDataset):
-    def __init__(self, *tensors, expand_times = 1, label_scheme = 'binary'):
+    RAMP_TURN_POINT = 0.2
+    def __init__(self, *tensors, expand_times = 1, label_scheme = 'binary', **kwargs):
         super().__init__(*tensors)
         self._expend_times = expand_times
         self._label_scheme = label_scheme
+        self._kwargs = kwargs
 
-    def _make_label(self, steer, positive):
+    def _make_label(self, steer, real_steer):
         if self._label_scheme == 'binary':
-            if positive:
+            if steer == real_steer:
                 label = torch.ones_like(steer)
             else:
                 label = torch.zeros_like(steer)
+        elif self._label_scheme == 'ramp':
+            diff = torch.abs(steer - real_steer)
+            pos_idxs = torch.where(diff <= self._kwargs.get('ramp_turn_point', CriticDataset.RAMP_TURN_POINT))[0]
+            label = torch.zeros_like(steer)
+            label[pos_idxs] = 1 - diff[pos_idxs]
         else:
             raise ValueError(f"Unsupported label scheme {self._label_scheme}")
 
@@ -45,11 +52,11 @@ class CriticDataset(TensorDataset):
         original_len = super().__len__()
         if index < original_len:
             image, steer = super().__getitem__(index)
-            label = self._make_label(steer, True)
+            label = self._make_label(steer, steer)
         else:
             image, steer = super().__getitem__(index % original_len)
-            steer = torch.rand_like(steer) * 2 - 1
-            label = self._make_label(steer, False)
+            fake_steer = torch.rand_like(steer) * 2 - 1
+            label = self._make_label(fake_steer, steer)
         
         return image, steer, label
 
