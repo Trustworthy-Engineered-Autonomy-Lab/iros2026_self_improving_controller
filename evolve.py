@@ -27,8 +27,6 @@ from tqdm import tqdm
 
 
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
-RC_THRESHOLD = 0.5
-CRITIC_THRESHOLD = 0.5
 RESULT_FOLDER = 'evolve_%Y_%m_%d_%H_%M_%S'
 
 
@@ -110,28 +108,72 @@ if __name__ == "__main__":
         pass
 
     mse = cae_steer.eval(
-        cae_steer_model, 
-        normalized_images, 
-        steers, 
-        device = device, 
+        cae_steer_model,
+        normalized_images,
+        steers,
+        device = device,
         **cae_steer_eval_config
     )
 
-    # mse = median_filter_1d(mse, 11)
+    # Remove top 10% highest MSE
+    remove_ratio = cae_steer_config.get('remove_ratio', 0.2)
+    keep_count = int(len(mse) * (1 - remove_ratio))
 
-    mse_threshold = cae_steer_config.get('mse_threshold', RC_THRESHOLD)
-    if isinstance(mse_threshold, str):
-        mse_threshold = eval(mse_threshold, {}, {'mean' : torch.mean(mse), 'stdev': torch.std(mse)})
-        print(f"MSE threshold is {mse_threshold:.4f}")
-    
-    selected = torch.where(mse <= mse_threshold)[0]
+    sorted_indices = torch.argsort(mse)  # MSE from low to high
+    selected = sorted_indices[:keep_count]
+    selected = torch.sort(selected).values  # Keep original order
 
     n_removed = images.shape[0] - len(selected)
 
     images = images[selected]
     steers = steers[selected]
 
-    print(f"Removed {n_removed} images whose mse > {mse_threshold:.4f}")
+    print(f"Removed {n_removed} images with highest MSE (top {remove_ratio*100:.0f}%)")
+
+    #-----------------------------------------------
+    # Step 2: CAE anomaly ratio control
+
+    cae_config = config.get('cae', {})
+    cae_train_config = cae_config.get('train', {})
+    max_anomaly_ratio = cae_config.get('max_anomaly_ratio', 0.1)
+
+    cae_model = CAE().to(device)
+
+    normalized_images = normalize_image(images).permute(0,3,1,2)
+
+    for loss in cae.train(cae_model, normalized_images, device, **cae_train_config):
+        pass
+
+    pcc, _ = cae.eval(cae_model, normalized_images, device)
+
+    pcc_std_factor = cae_config.get('pcc_std_factor', 1.0)
+    pcc_threshold = torch.mean(pcc) - pcc_std_factor * torch.std(pcc)
+
+    anomaly_mask = pcc < pcc_threshold
+    n_anomaly = anomaly_mask.sum().item()
+    n_total = len(images)
+    anomaly_ratio = n_anomaly / n_total
+
+    print(f"Anomaly images: {n_anomaly}/{n_total} ({anomaly_ratio*100:.1f}%)")
+
+    if anomaly_ratio > max_anomaly_ratio:
+        max_anomaly_count = int(n_total * max_anomaly_ratio)
+
+        sorted_indices = torch.argsort(pcc, descending=True)
+        keep_count = n_total - n_anomaly + max_anomaly_count
+        selected = sorted_indices[:keep_count]
+
+        selected = torch.sort(selected).values
+
+        n_removed_cae = n_total - len(selected)
+        images = images[selected]
+        steers = steers[selected]
+
+        print(f"Removed {n_removed_cae} anomaly images to keep ratio <= {max_anomaly_ratio*100:.0f}%")
+    else:
+        print(f"Anomaly ratio {anomaly_ratio*100:.1f}% <= {max_anomaly_ratio*100:.0f}%, no removal needed")
+
+    #-----------------------------------------------
 
     with open(result_folder / 'cleaned_data.pkl', 'wb') as f:
         pickle.dump({
@@ -140,7 +182,7 @@ if __name__ == "__main__":
         }, f)
 
     print(f"Saved cleaned data {result_folder / 'cleaned_data.pkl'}")
-        
+
     #-----------------------------------------------
 
     cnn_model = CNN().to(device)
