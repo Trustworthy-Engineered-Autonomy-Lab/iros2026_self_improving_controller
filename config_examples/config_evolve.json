@@ -1,6 +1,6 @@
 {
     "data" : {
-        "data/normal.pkl" : [0,20000,1], 
+        "data/normal.pkl" : [0,20000,1],
         "data/hitwall.pkl" : [0,1000,1],
         "data/zigzag.pkl" : [0,1000,1]
     },
@@ -13,8 +13,7 @@
         },
         "eval" : {
             "batch_size": 256
-        },
-        "remove_ratio" : 0.1
+        }
     },
     "cae" : {
         "train" : {
@@ -22,9 +21,11 @@
             "batch_size": 256,
             "nepochs": 100,
             "lam" : 1
-        },
-        "pcc_std_factor" : 1.0,
-        "max_anomaly_ratio" : 0.15
+        }
+    },
+    "confidence" : {
+        "mse_weight" : 0.8,
+        "pcc_weight" : 0.2
     },
     "cnn" : {
         "train" : {

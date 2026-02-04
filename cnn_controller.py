@@ -81,14 +81,23 @@ def train_epoch(
         model: nn.Module,
         dataloader: DataLoader,
         criterion: nn.Module,
-        optimizer: torch.optim.Optimizer
+        optimizer: torch.optim.Optimizer,
+        use_weights: bool = False
     ):
     model.train()
 
     total_loss = 0
-    for image, steer in dataloader:
-        pred_steer = model(image)
-        loss = criterion(pred_steer, steer).mean()
+    total_weight = 0
+    for batch in dataloader:
+        if use_weights:
+            image, steer, weight = batch
+            pred_steer = model(image)
+            loss_per_sample = criterion(pred_steer, steer).squeeze()
+            loss = (loss_per_sample * weight).mean()
+        else:
+            image, steer = batch
+            pred_steer = model(image)
+            loss = criterion(pred_steer, steer).mean()
 
         optimizer.zero_grad()
         loss.backward()
@@ -103,14 +112,22 @@ def train_epoch(
 def val_epoch(
         model: nn.Module,
         dataloader : DataLoader,
-        criterion: nn.Module
+        criterion: nn.Module,
+        use_weights: bool = False
     ):
     model.eval()
     total_loss = 0
-    for image, steer in dataloader:
+    for batch in dataloader:
         with torch.no_grad():
-            pred_steer = model(image)
-            loss = criterion(pred_steer, steer).mean()
+            if use_weights:
+                image, steer, weight = batch
+                pred_steer = model(image)
+                loss_per_sample = criterion(pred_steer, steer).squeeze()
+                loss = (loss_per_sample * weight).mean()
+            else:
+                image, steer = batch
+                pred_steer = model(image)
+                loss = criterion(pred_steer, steer).mean()
 
         total_loss += loss.item()
 
@@ -120,20 +137,27 @@ def val_epoch(
 
 def train(
         model: nn.Module,
-        images: torch.Tensor, 
-        steers: torch.Tensor, 
+        images: torch.Tensor,
+        steers: torch.Tensor,
         device = DEVICE,
         batch_size = BATCH_SIZE,
         nepochs = NUM_EPOCHS,
         lr = LEARNING_RATE,
-        weight_decay = WEIGHT_DECAY
+        weight_decay = WEIGHT_DECAY,
+        weights: torch.Tensor = None
     ):
     device = torch.device(device)
-    
+
     images = images.to(device, dtype=torch.float32)
     steers = steers.to(device, dtype=torch.float32)
 
-    dataset = TensorDataset(images, steers)
+    use_weights = weights is not None
+    if use_weights:
+        weights = weights.to(device, dtype=torch.float32)
+        dataset = TensorDataset(images, steers, weights)
+    else:
+        dataset = TensorDataset(images, steers)
+
     train_size = int(0.8 * len(dataset))
     val_size   = len(dataset) - train_size
     train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
@@ -141,16 +165,16 @@ def train(
     train_dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
     val_dataloader = DataLoader(val_dataset, batch_size=batch_size)
 
-    model = model.to(device)  
+    model = model.to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
     criterion = nn.MSELoss(reduction='none')
 
     pbar = tqdm(range(1, nepochs+1), desc="Training CNN Controller")
 
     for epoch in pbar:
-        
-        train_loss = train_epoch(model, train_dataloader, criterion, optimizer)
-        val_loss = val_epoch(model, val_dataloader, criterion)
+
+        train_loss = train_epoch(model, train_dataloader, criterion, optimizer, use_weights)
+        val_loss = val_epoch(model, val_dataloader, criterion, use_weights)
 
         pbar.set_postfix(train_loss=f"{train_loss:.4f}", val_loss=f"{val_loss:.4f}")
 

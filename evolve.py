@@ -90,6 +90,7 @@ if __name__ == "__main__":
     print(f"Loaded {images.shape[0]} image - steer pairs")
 
     #-----------------------------------------------
+    # Step 1: CAE-Steer - compute MSE for confidence weighting
 
     cae_steer_config = config.get('cae_steer', {})
     cae_steer_train_config = cae_steer_config.get('train', {})
@@ -115,26 +116,13 @@ if __name__ == "__main__":
         **cae_steer_eval_config
     )
 
-    # Remove top 10% highest MSE
-    remove_ratio = cae_steer_config.get('remove_ratio', 0.1)
-    keep_count = int(len(mse) * (1 - remove_ratio))
-
-    sorted_indices = torch.argsort(mse)  # MSE from low to high
-    selected = sorted_indices[:keep_count]
-
-    n_removed = images.shape[0] - len(selected)
-
-    images = images[selected]
-    steers = steers[selected]
-
-    print(f"Removed {n_removed} images with highest MSE (top {remove_ratio*100:.0f}%)")
+    print(f"CAE-Steer MSE: min={mse.min().item():.4f}, max={mse.max().item():.4f}, mean={mse.mean().item():.4f}")
 
     #-----------------------------------------------
-    # Step 2: CAE anomaly ratio control
+    # Step 2: CAE - compute PCC (RC) for confidence weighting
 
     cae_config = config.get('cae', {})
     cae_train_config = cae_config.get('train', {})
-    max_anomaly_ratio = cae_config.get('max_anomaly_ratio', 0.1)
 
     cae_model = CAE().to(device)
 
@@ -145,40 +133,40 @@ if __name__ == "__main__":
 
     pcc, _ = cae.eval(cae_model, normalized_images, device)
 
-    pcc_std_factor = cae_config.get('pcc_std_factor', 1.0)
-    pcc_threshold = torch.mean(pcc) - pcc_std_factor * torch.std(pcc)
+    print(f"CAE PCC: min={pcc.min().item():.4f}, max={pcc.max().item():.4f}, mean={pcc.mean().item():.4f}")
 
-    anomaly_mask = pcc < pcc_threshold
-    n_anomaly = anomaly_mask.sum().item()
-    n_total = len(images)
-    anomaly_ratio = n_anomaly / n_total
+    #-----------------------------------------------
+    # Step 3: Compute confidence weights from MSE and PCC
 
-    print(f"Anomaly images: {n_anomaly}/{n_total} ({anomaly_ratio*100:.1f}%)")
+    confidence_config = config.get('confidence', {})
+    mse_weight = confidence_config.get('mse_weight', 0.8)
+    pcc_weight = confidence_config.get('pcc_weight', 0.2)
 
-    if anomaly_ratio > max_anomaly_ratio:
-        max_anomaly_count = int(n_total * max_anomaly_ratio)
+    # Normalize MSE and PCC separately to [0, 1]
+    mse_norm = (mse - mse.min()) / (mse.max() - mse.min() + 1e-8)
+    pcc_norm = (pcc - pcc.min()) / (pcc.max() - pcc.min() + 1e-8)
 
-        sorted_indices = torch.argsort(pcc, descending=True)
-        keep_count = n_total - n_anomaly + max_anomaly_count
-        selected = sorted_indices[:keep_count]
+    # Combine: higher PCC and lower MSE = higher confidence
+    raw_confidence = pcc_weight * pcc_norm + mse_weight * (1.0 - mse_norm)
 
-        n_removed_cae = n_total - len(selected)
-        images = images[selected]
-        steers = steers[selected]
+    # Normalize to [0, 1]
+    conf_min, conf_max = raw_confidence.min(), raw_confidence.max()
+    sample_weights = (raw_confidence - conf_min) / (conf_max - conf_min + 1e-8)
 
-        print(f"Removed {n_removed_cae} anomaly images to keep ratio <= {max_anomaly_ratio*100:.0f}%")
-    else:
-        print(f"Anomaly ratio {anomaly_ratio*100:.1f}% <= {max_anomaly_ratio*100:.0f}%, no removal needed")
+    print(f"Confidence weights: min={sample_weights.min().item():.4f}, max={sample_weights.max().item():.4f}, mean={sample_weights.mean().item():.4f}")
 
     #-----------------------------------------------
 
-    with open(result_folder / 'cleaned_data.pkl', 'wb') as f:
+    with open(result_folder / 'confidence_data.pkl', 'wb') as f:
         pickle.dump({
-            'image' : images.detach().cpu().numpy(),
-            'steer': steers.detach().cpu().numpy().reshape(-1)
+            'image': images.detach().cpu().numpy(),
+            'steer': steers.detach().cpu().numpy().reshape(-1),
+            'mse': mse.detach().cpu().numpy(),
+            'pcc': pcc.detach().cpu().numpy(),
+            'weights': sample_weights.detach().cpu().numpy()
         }, f)
 
-    print(f"Saved cleaned data {result_folder / 'cleaned_data.pkl'}")
+    print(f"Saved confidence data {result_folder / 'confidence_data.pkl'}")
 
     #-----------------------------------------------
 
@@ -196,6 +184,7 @@ if __name__ == "__main__":
         images,
         steers,
         device,
+        weights=sample_weights,
         **cnn_train_config
     ):
         if early_stop(train_loss, val_loss):
