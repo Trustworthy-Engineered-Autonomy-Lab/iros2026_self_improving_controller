@@ -14,7 +14,17 @@
         "eval" : {
             "batch_size": 256
         },
-        "mse_threshold" : "mean + 3 * stdev"
+        "remove_ratio" : 0.1
+    },
+    "cae" : {
+        "train" : {
+            "lr": 5e-4,
+            "batch_size": 256,
+            "nepochs": 100,
+            "lam" : 1
+        },
+        "pcc_std_factor" : 1.0,
+        "max_anomaly_ratio" : 0.15
     },
     "cnn" : {
         "train" : {

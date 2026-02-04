@@ -116,12 +116,11 @@ if __name__ == "__main__":
     )
 
     # Remove top 10% highest MSE
-    remove_ratio = cae_steer_config.get('remove_ratio', 0.2)
+    remove_ratio = cae_steer_config.get('remove_ratio', 0.1)
     keep_count = int(len(mse) * (1 - remove_ratio))
 
     sorted_indices = torch.argsort(mse)  # MSE from low to high
     selected = sorted_indices[:keep_count]
-    selected = torch.sort(selected).values  # Keep original order
 
     n_removed = images.shape[0] - len(selected)
 
@@ -162,8 +161,6 @@ if __name__ == "__main__":
         sorted_indices = torch.argsort(pcc, descending=True)
         keep_count = n_total - n_anomaly + max_anomaly_count
         selected = sorted_indices[:keep_count]
-
-        selected = torch.sort(selected).values
 
         n_removed_cae = n_total - len(selected)
         images = images[selected]
