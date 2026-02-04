@@ -2,17 +2,22 @@
     "train" : {
         "lr": 1e-5,
         "batch_size": 256,
-        "nepochs": 100
+        "nepochs": 100,
+        "lam" : 0
     },
     "eval" : {
         "batch_size": 256
     },
     "record_interval": 5,
     "load_data" : {
-        "normal" : "data/normal.pkl"
+        "normal" : "data/normal.pkl",
+        "hitwall" : "data/hitwall.pkl",
+        "zigzag" : "data/zigzag.pkl"
     },
     "training_data" : {
-        "normal" : [0,20000,1]
+        "normal" : [0,20000,1],
+        "hitwall" : [0,1000,1],
+        "zigzag" : [0,1000,1]
     },
     "result_folder" : "runs/cae_steer/%Y_%m_%d_%H_%M_%S"
 }

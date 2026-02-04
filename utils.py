@@ -62,15 +62,16 @@ def construct_data(data: dict, config: dict):
         'steer' : np.concatenate(steer_list)
     }
 
-def plot_loss_curve(train_loss, val_loss):
+def plot_loss_curve(train_loss, val_loss = None):
 
     fig, ax = plt.subplots()
 
     ax.plot(range(len(train_loss)), train_loss, '-*', label="Train")
-    ax.plot(range(len(val_loss)), val_loss, '-.', label="Validation")
+    if val_loss is not None:
+        ax.plot(range(len(val_loss)), val_loss, '-.', label="Validation")
     ax.set_xlabel("Epoch")
     ax.set_ylabel("Loss")
-    ax.set_title("Training / Validation Loss")
+    ax.set_title("Loss Curve")
     ax.legend()
     ax.grid(True)
 

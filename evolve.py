@@ -5,6 +5,7 @@ import json
 import pickle
 
 import torch
+import torch.nn.functional as F
 import numpy as np
 
 from utils import proc_collected_data
@@ -16,16 +17,27 @@ import critic
 from critic import Critic
 import cnn_controller
 from cnn_controller import CNN
+import cae_steer
+from cae_steer import CAESteer
 
 from utils import EarlyStopCriterion
 
 from datetime import datetime
+from tqdm import tqdm
 
 
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
 RC_THRESHOLD = 0.5
 CRITIC_THRESHOLD = 0.5
 RESULT_FOLDER = 'evolve_%Y_%m_%d_%H_%M_%S'
+
+
+def median_filter_1d(x, kernel_size):
+    pad = kernel_size // 2
+    x_padded = F.pad(x.unsqueeze(0).unsqueeze(0), (pad, pad), mode='reflect')
+    windows = x_padded.unfold(dimension=2, size=kernel_size, step=1)
+    return windows.median(dim=-1).values.squeeze()
+
 
 if __name__ == "__main__":
     
@@ -81,64 +93,45 @@ if __name__ == "__main__":
 
     #-----------------------------------------------
 
-    cae_config = config.get('cae', {})
-    cae_train_config = cae_config.get('train', {})
-    cae_model = CAE().to(device)
+    cae_steer_config = config.get('cae_steer', {})
+    cae_steer_train_config = cae_steer_config.get('train', {})
+    cae_steer_eval_config = cae_steer_config.get('eval',  {})
+    cae_steer_model = CAESteer().to(device)
 
     normalized_images = normalize_image(images).permute(0,3,1,2)
 
-    for loss in cae.train(
-        cae_model,
+    for loss in cae_steer.train(
+        cae_steer_model,
         normalized_images,
-        device,
-        **cae_train_config
-    ):
-        pass
-
-    rc, mse = cae.eval(cae_model, normalized_images, device)
-
-    rc_threshold = cae_config.get('rc_threshold', RC_THRESHOLD)
-    if isinstance(rc_threshold, str):
-        rc_threshold = eval(rc_threshold, {}, {'mean' : torch.mean(rc), 'stdev': torch.std(rc)})
-        print(f"RC threshold is {rc_threshold:.2f}")
-    
-    selected = torch.where(rc >= rc_threshold)[0]
-
-    n_removed = images.shape[0] - len(selected)
-
-    images = images[selected]
-    steers = steers[selected]
-
-    print(f"Removed {n_removed} images whose rc value < {rc_threshold:.2f}")
-
-    #-----------------------------------------------
-
-    critic_config = config.get('critic', {})
-    critic_train_config = critic_config.get('train', {})
-
-    critic_model = Critic().to(device)
-
-    for loss in critic.train(
-        critic_model,
-        images,
         steers,
-        device,
-        **critic_train_config
+        device = device,
+        **cae_steer_train_config
     ):
         pass
-    
-    critic_model.eval()
-    critic_score = critic_model(images, steers)
 
-    critic_threshold = critic_config.get('threshold', CRITIC_THRESHOLD)
-    selected = torch.where(critic_score >= critic_threshold)[0]
+    mse = cae_steer.eval(
+        cae_steer_model, 
+        normalized_images, 
+        steers, 
+        device = device, 
+        **cae_steer_eval_config
+    )
+
+    # mse = median_filter_1d(mse, 11)
+
+    mse_threshold = cae_steer_config.get('mse_threshold', RC_THRESHOLD)
+    if isinstance(mse_threshold, str):
+        mse_threshold = eval(mse_threshold, {}, {'mean' : torch.mean(mse), 'stdev': torch.std(mse)})
+        print(f"MSE threshold is {mse_threshold:.4f}")
+    
+    selected = torch.where(mse <= mse_threshold)[0]
 
     n_removed = images.shape[0] - len(selected)
 
     images = images[selected]
     steers = steers[selected]
 
-    print(f"Removed {n_removed} images whose critic score < {critic_threshold:.2f}")
+    print(f"Removed {n_removed} images whose mse > {mse_threshold:.4f}")
 
     with open(result_folder / 'cleaned_data.pkl', 'wb') as f:
         pickle.dump({

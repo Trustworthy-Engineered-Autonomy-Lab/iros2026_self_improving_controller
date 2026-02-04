@@ -1,17 +1,20 @@
 {
     "data" : {
-        "data/normal.pkl" : [1,2000,1], 
-        "data/hitwall.pkl" : [1,500,1],
-        "data/zigzag.pkl" : [1,500,1]
+        "data/normal.pkl" : [0,20000,1], 
+        "data/hitwall.pkl" : [0,1000,1],
+        "data/zigzag.pkl" : [0,1000,1]
     },
-    "cae" : {
+    "cae_steer" : {
         "train" : {
-            "lr" : 5e-4,
+            "lr": 1e-5,
             "batch_size": 256,
-            "lam" : 1,
-            "nepochs": 100
+            "nepochs": 100,
+            "lam" : 1
         },
-        "rc_threshold" : "mean"
+        "eval" : {
+            "batch_size": 256
+        },
+        "mse_threshold" : "mean + 3 * stdev"
     },
     "cnn" : {
         "train" : {
@@ -24,19 +27,6 @@
             "input_name" : "image",
             "output_name" : "steer"
         }
-    },
-    "critic" : {
-        "train" : {
-            "batch_size" : 256,
-            "lr" : 0.0005,
-            "weight_decay" : 1e-4,
-            "nepochs" : 100,
-            "dataset_config" : {
-                "expand_times" : 1,
-                "label_scheme" : "binary"
-            }
-        },
-        "threshold" : 0.5
     },
     "result_folder" : "runs/evolve/%Y_%m_%d_%H_%M_%S"
 }
