@@ -138,31 +138,82 @@ if __name__ == "__main__":
     #-----------------------------------------------
     # Step 3: Compute confidence weights from MSE and PCC
 
-    confidence_config = config.get('confidence', {})
-    mse_weight = confidence_config.get('mse_weight', 0.8)
-    pcc_weight = confidence_config.get('pcc_weight', 0.2)
+    # ===== Three-Stage MSE Confidence Calculation =====
+    # User's design: Leverage MSE distribution characteristic (median < mean for right-skewed)
+    # Stage 1 (MSE < median): Linear growth to 0.7
+    # Stage 2 (median ≤ MSE < mean): Steep decay to 0.4
+    # Stage 3 (MSE ≥ mean): Exponential decay to ~0
 
-    # Normalize MSE and PCC separately to [0, 1]
-    mse_norm = (mse - mse.min()) / (mse.max() - mse.min() + 1e-8)
-    pcc_norm = (pcc - pcc.min()) / (pcc.max() - pcc.min() + 1e-8)
+    # Step 1: Calculate distribution landmarks
+    mse_median = torch.median(mse)
+    mse_mean = mse.mean()
+    mse_min = mse.min()
 
-    # Combine: higher PCC and lower MSE = higher confidence
-    raw_confidence = pcc_weight * pcc_norm + mse_weight * (1.0 - mse_norm)
+    # Step 2: Three-stage MSE confidence
+    conf_stage1 = 1.0 - 0.3 * (mse - mse_min) / (mse_median - mse_min + 1e-8)
+    conf_stage1 = conf_stage1.clamp(0.7, 1.0)
 
-    # Normalize to [0, 1]
-    conf_min, conf_max = raw_confidence.min(), raw_confidence.max()
-    sample_weights = (raw_confidence - conf_min) / (conf_max - conf_min + 1e-8)
+    # Stage 2: Degrading action (median ≤ MSE < mean) → quadratic decay 0.7 to 0.4
+    ratio_stage2 = (mse - mse_median) / (mse_mean - mse_median + 1e-8)
+    conf_stage2 = 0.7 - 0.3 * (ratio_stage2 ** 2)
+    conf_stage2 = conf_stage2.clamp(0.4, 0.7)
 
-    print(f"Confidence weights: min={sample_weights.min().item():.4f}, max={sample_weights.max().item():.4f}, mean={sample_weights.mean().item():.4f}")
+    # Stage 3: Poor action (MSE ≥ mean) → exponential decay 0.4 to 0
+    decay_rate = 2.0  # Tunable: higher = harsher punishment
+    conf_stage3 = 0.4 * torch.exp(-decay_rate * (mse - mse_mean) / (mse_mean - mse_median + 1e-8))
+    conf_stage3 = conf_stage3.clamp(0.0, 0.4)
+
+    # Combine three stages
+    mse_confidence = torch.where(
+        mse < mse_median,
+        conf_stage1,
+        torch.where(
+            mse < mse_mean,
+            conf_stage2,
+            conf_stage3
+        )
+    )
+
+    # Step 3: PCC confidence with lower bound
+    # Even for poor quality images, maintain minimum weight for error correction learning
+    pcc_median = torch.median(pcc)
+    pcc_mad = torch.median(torch.abs(pcc - pcc_median))
+    pcc_z = (pcc - pcc_median) / (pcc_mad + 1e-8)
+
+    pcc_lower_bound = 0.5  # Tunable: minimum weight for poor quality images (0.4-0.6)
+
+    # Map pcc_z to [pcc_lower_bound, 1.0]
+    # pcc_z > 0 (good quality) → confidence approaches 1.0
+    # pcc_z < -2 (poor quality) → confidence approaches pcc_lower_bound
+    pcc_confidence = torch.where(
+        pcc_z > 0,
+        # Good quality: linear increase to 1.0
+        torch.clamp(pcc_lower_bound + (1.0 - pcc_lower_bound) * (1.0 + 0.5 * pcc_z), pcc_lower_bound, 1.0),
+        # Poor quality: exponential decay to lower_bound
+        pcc_lower_bound + (1.0 - pcc_lower_bound) * torch.exp(0.5 * pcc_z)
+    )
+    pcc_confidence = torch.clamp(pcc_confidence, pcc_lower_bound, 1.0)
+
+    # Step 4: Combine using squared MSE and PCC
+    # final_weight = (mse_confidence)^2 * pcc_confidence
+    # Squaring MSE amplifies differences between good/bad actions
+    # PCC provides bounded adjustment [pcc_lower_bound, 1.0]
+    sample_weights = (mse_confidence ** 2) * pcc_confidence
+    sample_weights = torch.clamp(sample_weights, 0.0, 1.0)
+
+    print(f"MSE confidence: min={mse_confidence.min().item():.4f}, max={mse_confidence.max().item():.4f}, mean={mse_confidence.mean().item():.4f}")
+    print(f"PCC confidence: min={pcc_confidence.min().item():.4f}, max={pcc_confidence.max().item():.4f}, mean={pcc_confidence.mean().item():.4f}")
+    print(f"Sample weights: min={sample_weights.min().item():.4f}, max={sample_weights.max().item():.4f}, mean={sample_weights.mean().item():.4f}")
 
     #-----------------------------------------------
-
     with open(result_folder / 'confidence_data.pkl', 'wb') as f:
         pickle.dump({
             'image': images.detach().cpu().numpy(),
             'steer': steers.detach().cpu().numpy().reshape(-1),
             'mse': mse.detach().cpu().numpy(),
             'pcc': pcc.detach().cpu().numpy(),
+            'mse_confidence': mse_confidence.detach().cpu().numpy(),
+            'pcc_confidence': pcc_confidence.detach().cpu().numpy(),
             'weights': sample_weights.detach().cpu().numpy()
         }, f)
 

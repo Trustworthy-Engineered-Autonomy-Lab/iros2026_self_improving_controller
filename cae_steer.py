@@ -142,12 +142,12 @@ def train (
     reference_indices = np.random.choice(all_indices, size=len(images) // 50, replace=False)
     reference_dataset = Subset(train_dataset, reference_indices)
     reference_loader = DataLoader(reference_dataset, batch_size=len(reference_dataset), shuffle=False)
-
+    
     model.eval()
     reference_latent_list = []
     with torch.no_grad():
         for image, steer in reference_loader:
-            _, reference_latent = model(images)
+            _, reference_latent = model(image)
             reference_latent_list.append(reference_latent)
 
     reference_latent = torch.concatenate(reference_latent_list)

@@ -93,7 +93,8 @@ def train_epoch(
             image, steer, weight = batch
             pred_steer = model(image)
             loss_per_sample = criterion(pred_steer, steer).squeeze()
-            loss = (loss_per_sample * weight).mean()
+            # Normalize by total weight to maintain loss magnitude
+            loss = (loss_per_sample * weight).sum() / weight.sum()
         else:
             image, steer = batch
             pred_steer = model(image)
