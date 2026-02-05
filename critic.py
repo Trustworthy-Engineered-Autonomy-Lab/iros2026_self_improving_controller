@@ -31,10 +31,7 @@ class CriticDataset(TensorDataset):
 
     def _make_label(self, steer, real_steer):
         if self._label_scheme == 'binary':
-            if steer == real_steer:
-                label = torch.ones_like(steer)
-            else:
-                label = torch.zeros_like(steer)
+            label = (steer == real_steer).float()
         elif self._label_scheme == 'ramp':
             diff = torch.abs(steer - real_steer)
             pos_idxs = torch.where(diff <= self._kwargs.get('ramp_turn_point', CriticDataset.RAMP_TURN_POINT))[0]
@@ -54,9 +51,9 @@ class CriticDataset(TensorDataset):
             image, steer = super().__getitem__(index)
             label = self._make_label(steer, steer)
         else:
-            image, steer = super().__getitem__(index % original_len)
-            fake_steer = torch.rand_like(steer) * 2 - 1
-            label = self._make_label(fake_steer, steer)
+            image, real_steer = super().__getitem__(index % original_len)
+            steer = torch.rand_like(real_steer) * 2 - 1
+            label = self._make_label(steer, real_steer)
         
         return image, steer, label
 
