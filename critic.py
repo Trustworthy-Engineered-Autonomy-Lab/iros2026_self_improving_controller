@@ -1,6 +1,6 @@
 import torch
 from torch import nn
-from torch.utils.data import TensorDataset, DataLoader, random_split
+from torch.utils.data import Dataset, DataLoader, random_split
 import numpy as np
 
 import argparse
@@ -21,20 +21,22 @@ RESULT_FOLDER = "critic_%Y_%m_%d_%H_%M_%S"
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
 
 
-class CriticDataset(TensorDataset):
+class CriticDataset(Dataset):
     RAMP_TURN_POINT = 0.2
-    def __init__(self, *tensors, expand_times = 1, label_scheme = 'binary', **kwargs):
-        super().__init__(*tensors)
-        self._expend_times = expand_times
-        self._label_scheme = label_scheme
-        self._kwargs = kwargs
+    def __init__(self, images, steers, expand_times = 1, label_scheme = 'binary', **kwargs):
+        super().__init__()
+        self._images = images
+        rand_steers = torch.rand(steers.shape[0] * expand_times, 1, device=steers.device)
+        real_steers = steers.repeat(expand_times + 1, *([1] * (steers.dim() - 1)))
+        self._steers = torch.concatenate([steers, rand_steers])
+        self._labels = self._make_label(real_steers, self._steers, label_scheme, **kwargs)
 
-    def _make_label(self, steer, real_steer):
-        if self._label_scheme == 'binary':
+    def _make_label(self, steer, real_steer, label_scheme = 'binary', **kwargs):
+        if label_scheme == 'binary':
             label = (steer == real_steer).float()
-        elif self._label_scheme == 'ramp':
+        elif label_scheme == 'ramp':
             diff = torch.abs(steer - real_steer)
-            pos_idxs = torch.where(diff <= self._kwargs.get('ramp_turn_point', CriticDataset.RAMP_TURN_POINT))[0]
+            pos_idxs = torch.where(diff <= kwargs.get('ramp_turn_point', CriticDataset.RAMP_TURN_POINT))[0]
             label = torch.zeros_like(steer)
             label[pos_idxs] = 1 - diff[pos_idxs]
         else:
@@ -43,17 +45,14 @@ class CriticDataset(TensorDataset):
         return label
 
     def __len__(self):
-        return super().__len__() * (1 + self._expend_times)
+        return self._labels.shape[0]
     
     def __getitem__(self, index):
-        original_len = super().__len__()
-        if index < original_len:
-            image, steer = super().__getitem__(index)
-            label = self._make_label(steer, steer)
-        else:
-            image, real_steer = super().__getitem__(index % original_len)
-            steer = torch.rand_like(real_steer) * 2 - 1
-            label = self._make_label(steer, real_steer)
+
+        real_len = self._images.shape[0]
+        image = self._images[index % real_len]
+        steer = self._steers[index]
+        label = self._labels[index]
         
         return image, steer, label
 
