@@ -112,10 +112,10 @@ if __name__ == "__main__":
 
     n_removed = images.shape[0] - len(selected)
 
-    images = images[selected]
-    steers = steers[selected]
+    critic_images = images[selected]
+    critic_steers = steers[selected]
 
-    print(f"Removed {n_removed} images whose rc value < {rc_threshold:.2f}")
+    print(f"Removed {n_removed} images whose rc value < {rc_threshold:.2f} for critic")
 
     #-----------------------------------------------
 
@@ -126,8 +126,8 @@ if __name__ == "__main__":
 
     for loss in critic.train(
         critic_model,
-        images,
-        steers,
+        critic_images,
+        critic_steers,
         device,
         **critic_train_config
     ):
