@@ -150,18 +150,17 @@ if __name__ == "__main__":
     mse_min = mse.min()
 
     # Step 2: Three-stage MSE confidence
-    conf_stage1 = 1.0 - 0.3 * (mse - mse_min) / (mse_median - mse_min + 1e-8)
-    conf_stage1 = conf_stage1.clamp(0.7, 1.0)
+    conf_stage1 = 1.0 
 
     # Stage 2: Degrading action (median ≤ MSE < mean) → quadratic decay 0.7 to 0.4
     ratio_stage2 = (mse - mse_median) / (mse_mean - mse_median + 1e-8)
-    conf_stage2 = 0.7 - 0.3 * (ratio_stage2 ** 2)
-    conf_stage2 = conf_stage2.clamp(0.4, 0.7)
+    conf_stage2 = 1.0 - 0.2 * (ratio_stage2 ** 2)
+    conf_stage2 = conf_stage2.clamp(0.8, 1.0)
 
     # Stage 3: Poor action (MSE ≥ mean) → exponential decay 0.4 to 0
     decay_rate = 2.0  # Tunable: higher = harsher punishment
-    conf_stage3 = 0.4 * torch.exp(-decay_rate * (mse - mse_mean) / (mse_mean - mse_median + 1e-8))
-    conf_stage3 = conf_stage3.clamp(0.0, 0.4)
+    conf_stage3 = 0.8 * torch.exp(-decay_rate * (mse - mse_mean) / (mse_mean - mse_median + 1e-8))
+    conf_stage3 = conf_stage3.clamp(0.0, 0.8)
 
     # Combine three stages
     mse_confidence = torch.where(
@@ -180,7 +179,7 @@ if __name__ == "__main__":
     pcc_mad = torch.median(torch.abs(pcc - pcc_median))
     pcc_z = (pcc - pcc_median) / (pcc_mad + 1e-8)
 
-    pcc_lower_bound = 0.5  # Tunable: minimum weight for poor quality images (0.4-0.6)
+    pcc_lower_bound = 0.4  # Tunable: minimum weight for poor quality images (0.4-0.6)
 
     # Map pcc_z to [pcc_lower_bound, 1.0]
     # pcc_z > 0 (good quality) → confidence approaches 1.0
