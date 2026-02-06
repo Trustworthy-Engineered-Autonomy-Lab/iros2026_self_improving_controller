@@ -1,8 +1,7 @@
 import torch
 from torch import nn
-from torch.utils.data import TensorDataset, DataLoader, Subset, random_split
-
-import numpy as np
+import torch.nn.functional as F
+from torch.utils.data import TensorDataset, DataLoader
 from tqdm import tqdm
 import argparse
 import json
@@ -18,8 +17,11 @@ class SteerDecoder(nn.Sequential):
     def __init__(self):
         super().__init__(
             nn.Linear(256, 128),
+            nn.LeakyReLU(),
             nn.Linear(128, 64),
+            nn.LeakyReLU(),
             nn.Linear(64, 16),
+            nn.LeakyReLU(),
             nn.Linear(16, 1),
             nn.Tanh()
         )
@@ -28,8 +30,11 @@ class SteerEncoder(nn.Sequential):
     def __init__(self):
         super().__init__(
             nn.Linear(1, 16),
+            nn.LeakyReLU(),
             nn.Linear(16, 64),
+            nn.LeakyReLU(),
             nn.Linear(64, 128),
+            nn.LeakyReLU(),
             nn.Linear(128, 256),
             nn.Tanh()
         )
@@ -39,13 +44,15 @@ class CAESteer(nn.Module):
         super().__init__()
 
         self.encoder = ImageEncoder()
+        self.steer_encoder = SteerEncoder()
         self.decoder = SteerDecoder()
 
-    def forward(self, x):
-        latent = self.encoder(x)
-        steer = self.decoder(latent)
+    def forward(self, image, steer=None):
+        latent_image = self.encoder(image)
+        pred_steer = self.decoder(latent_image)
+        latent_steer = self.steer_encoder(steer) if steer is not None else None
 
-        return steer, latent
+        return pred_steer, latent_image, latent_steer
 
 LEARNING_RATE = 5e-4
 BATCH_SIZE = 256  
@@ -79,7 +86,7 @@ def eval(
     loss_list = []
     with torch.no_grad():
         for image, steer in val_loader:
-            pred_steer, latent = model(image)
+            pred_steer, _, _ = model(image)
             loss = criterion(pred_steer, steer).mean(dim=1)
             loss_list.append(loss)
 
@@ -88,33 +95,25 @@ def eval(
 def train_epoch(
         model: nn.Module,
         dataloader: DataLoader,
-        reference_latent: torch.Tensor,
         criterion: nn.Module,
         optimizer: torch.optim.Optimizer,
-        lam = LAMBDA
+        lam: float = LAMBDA,
     ):
     model.train()
     total_loss = 0
     for image, steer in dataloader:
-        
-        output, latent = model(image)  
-        mse_loss = criterion(output, steer)  
 
-        distances = torch.cdist(latent, reference_latent)  
-
-        min_indices = torch.argmin(distances, dim=1)  
-        nearest_latent = reference_latent[min_indices]  
-
-        l2_loss = (latent - nearest_latent).pow(2).mean()  
-
-        loss = mse_loss + lam * l2_loss
+        pred_steer, latent_image, latent_steer = model(image, steer)
+        mse_loss = criterion(pred_steer, steer)
+        align_loss = F.mse_loss(latent_image, latent_steer)
+        loss = mse_loss + lam * align_loss
 
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
 
         total_loss += loss.item()
-    
+
     avg_loss = total_loss / len(dataloader)
 
     return avg_loss
@@ -128,7 +127,7 @@ def train (
         nepochs = NUM_EPOCHS,
         lr = LEARNING_RATE,
         weight_decay = WEIGHT_DECAY,
-        lam = LAMBDA
+        lam = LAMBDA,
     ):
     images = images.to(device, torch.float32)
     steers = steers.to(device, torch.float32)
@@ -138,26 +137,12 @@ def train (
 
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
 
-    all_indices = np.arange(len(images))
-    reference_indices = np.random.choice(all_indices, size=len(images) // 50, replace=False)
-    reference_dataset = Subset(train_dataset, reference_indices)
-    reference_loader = DataLoader(reference_dataset, batch_size=len(reference_dataset), shuffle=False)
-    
-    model.eval()
-    reference_latent_list = []
-    with torch.no_grad():
-        for image, steer in reference_loader:
-            _, reference_latent = model(image)
-            reference_latent_list.append(reference_latent)
-
-    reference_latent = torch.concatenate(reference_latent_list)
-
     criterion = nn.MSELoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
 
     pbar = tqdm(range(1, nepochs + 1), desc=f"Training CAE steer")
     for epoch in pbar:
-        train_loss = train_epoch(model, train_loader, reference_latent, criterion, optimizer, lam)
+        train_loss = train_epoch(model, train_loader, criterion, optimizer, lam)
 
         pbar.set_postfix(train_loss=f"{train_loss:.4f}")
 
