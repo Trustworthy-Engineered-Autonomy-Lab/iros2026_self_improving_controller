@@ -116,7 +116,12 @@ if __name__ == "__main__":
         **cae_steer_eval_config
     )
 
-    print(f"CAE-Steer MSE: min={mse.min().item():.4f}, max={mse.max().item():.4f}, mean={mse.mean().item():.4f}")
+    mse_median = torch.median(mse)
+    mse_mean = mse.mean()
+    mse_min = mse.min()
+    mse_max = mse.max()
+
+    print(f"CAE-Steer MSE: min={mse_min.item():.4f}, max={mse_max.item():.4f}, mean={mse_mean.item():.4f}, medium={mse_median.item():.4f}")
 
     #-----------------------------------------------
     # Step 2: CAE - compute PCC (RC) for confidence weighting
@@ -133,7 +138,9 @@ if __name__ == "__main__":
 
     pcc, _ = cae.eval(cae_model, normalized_images, device)
 
-    print(f"CAE PCC: min={pcc.min().item():.4f}, max={pcc.max().item():.4f}, mean={pcc.mean().item():.4f}")
+    pcc_median = torch.median(pcc)
+
+    print(f"CAE PCC: min={pcc.min().item():.4f}, max={pcc.max().item():.4f}, mean={pcc.mean().item():.4f}, medium={pcc_median.item():.4f}")
 
     #-----------------------------------------------
     # Step 3: Compute confidence weights from MSE and PCC
@@ -143,11 +150,6 @@ if __name__ == "__main__":
     # Stage 1 (MSE < median): Linear growth to 0.7
     # Stage 2 (median ≤ MSE < mean): Steep decay to 0.4
     # Stage 3 (MSE ≥ mean): Exponential decay to ~0
-
-    # Step 1: Calculate distribution landmarks
-    mse_median = torch.median(mse)
-    mse_mean = mse.mean()
-    mse_min = mse.min()
 
     # Step 2: Three-stage MSE confidence
     conf_stage1 = 1.0 - 0.3 * (mse - mse_min) / (mse_median - mse_min + 1e-8)
@@ -176,7 +178,6 @@ if __name__ == "__main__":
 
     # Step 3: PCC confidence with lower bound
     # Even for poor quality images, maintain minimum weight for error correction learning
-    pcc_median = torch.median(pcc)
     pcc_mad = torch.median(torch.abs(pcc - pcc_median))
     pcc_z = (pcc - pcc_median) / (pcc_mad + 1e-8)
 
@@ -198,11 +199,9 @@ if __name__ == "__main__":
     # final_weight = (mse_confidence)^2 * pcc_confidence
     # Squaring MSE amplifies differences between good/bad actions
     # PCC provides bounded adjustment [pcc_lower_bound, 1.0]
-    sample_weights = (mse_confidence ** 2) * pcc_confidence
+    sample_weights = mse_confidence * pcc_confidence
     sample_weights = torch.clamp(sample_weights, 0.0, 1.0)
 
-    print(f"MSE confidence: min={mse_confidence.min().item():.4f}, max={mse_confidence.max().item():.4f}, mean={mse_confidence.mean().item():.4f}")
-    print(f"PCC confidence: min={pcc_confidence.min().item():.4f}, max={pcc_confidence.max().item():.4f}, mean={pcc_confidence.mean().item():.4f}")
     print(f"Sample weights: min={sample_weights.min().item():.4f}, max={sample_weights.max().item():.4f}, mean={sample_weights.mean().item():.4f}")
 
     #-----------------------------------------------
