@@ -136,72 +136,36 @@ if __name__ == "__main__":
     print(f"CAE PCC: min={pcc.min().item():.4f}, max={pcc.max().item():.4f}, mean={pcc.mean().item():.4f}")
 
     #-----------------------------------------------
-    # Step 3: Compute confidence weights from MSE and PCC
+    # Step 3: Quadrant classification + steer repair
 
-    # ===== Three-Stage MSE Confidence Calculation =====
-    # User's design: Leverage MSE distribution characteristic (median < mean for right-skewed)
-    # Stage 1 (MSE < median): Linear growth to 0.7
-    # Stage 2 (median ≤ MSE < mean): Steep decay to 0.4
-    # Stage 3 (MSE ≥ mean): Exponential decay to ~0
-
-    # Step 1: Calculate distribution landmarks
     mse_median = torch.median(mse)
-    mse_mean = mse.mean()
-    mse_min = mse.min()
-
-    # Step 2: Three-stage MSE confidence
-    conf_stage1 = 1.0 
-
-    # Stage 2: Degrading action (median ≤ MSE < mean) → quadratic decay 0.7 to 0.4
-    ratio_stage2 = (mse - mse_median) / (mse_mean - mse_median + 1e-8)
-    conf_stage2 = 1.0 - 0.2 * (ratio_stage2 ** 2)
-    conf_stage2 = conf_stage2.clamp(0.8, 1.0)
-
-    # Stage 3: Poor action (MSE ≥ mean) → exponential decay 0.4 to 0
-    decay_rate = 2.0  # Tunable: higher = harsher punishment
-    conf_stage3 = 0.8 * torch.exp(-decay_rate * (mse - mse_mean) / (mse_mean - mse_median + 1e-8))
-    conf_stage3 = conf_stage3.clamp(0.0, 0.8)
-
-    # Combine three stages
-    mse_confidence = torch.where(
-        mse < mse_median,
-        conf_stage1,
-        torch.where(
-            mse < mse_mean,
-            conf_stage2,
-            conf_stage3
-        )
-    )
-
-    # Step 3: PCC confidence with lower bound
-    # Even for poor quality images, maintain minimum weight for error correction learning
     pcc_median = torch.median(pcc)
-    pcc_mad = torch.median(torch.abs(pcc - pcc_median))
-    pcc_z = (pcc - pcc_median) / (pcc_mad + 1e-8)
 
-    pcc_lower_bound = 0.4  # Tunable: minimum weight for poor quality images (0.4-0.6)
+    # Get CAE-Steer predicted steers for repair
+    pred_steers = cae_steer.predict(cae_steer_model, normalized_images, device)
 
-    # Map pcc_z to [pcc_lower_bound, 1.0]
-    # pcc_z > 0 (good quality) → confidence approaches 1.0
-    # pcc_z < -2 (poor quality) → confidence approaches pcc_lower_bound
-    pcc_confidence = torch.where(
-        pcc_z > 0,
-        # Good quality: linear increase to 1.0
-        torch.clamp(pcc_lower_bound + (1.0 - pcc_lower_bound) * (1.0 + 0.5 * pcc_z), pcc_lower_bound, 1.0),
-        # Poor quality: exponential decay to lower_bound
-        pcc_lower_bound + (1.0 - pcc_lower_bound) * torch.exp(0.5 * pcc_z)
-    )
-    pcc_confidence = torch.clamp(pcc_confidence, pcc_lower_bound, 1.0)
+    # Quadrant masks
+    mask_cat3 = (mse < mse_median) & (pcc > pcc_median)  # good action + normal image
+    mask_cat1 = (mse < mse_median) & (pcc < pcc_median)  # good action + abnormal image
+    mask_cat4 = (mse > mse_median) & (pcc > pcc_median)  # bad action + normal image → repair
+    mask_cat2 = (mse > mse_median) & (pcc < pcc_median)  # bad action + abnormal image → discard
 
-    # Step 4: Combine using squared MSE and PCC
-    # final_weight = (mse_confidence)^2 * pcc_confidence
-    # Squaring MSE amplifies differences between good/bad actions
-    # PCC provides bounded adjustment [pcc_lower_bound, 1.0]
-    sample_weights = (mse_confidence ** 2) * pcc_confidence
-    sample_weights = torch.clamp(sample_weights, 0.0, 1.0)
+    # Repair Cat 4 steers with CAE-Steer predictions
+    cleaned_steers = steers.clone()
+    cleaned_steers[mask_cat4] = pred_steers[mask_cat4]
 
-    print(f"MSE confidence: min={mse_confidence.min().item():.4f}, max={mse_confidence.max().item():.4f}, mean={mse_confidence.mean().item():.4f}")
-    print(f"PCC confidence: min={pcc_confidence.min().item():.4f}, max={pcc_confidence.max().item():.4f}, mean={pcc_confidence.mean().item():.4f}")
+    # Assign weights
+    sample_weights = torch.zeros_like(mse)
+    sample_weights[mask_cat3] = 1.0  # best data
+    sample_weights[mask_cat1] = 0.5  # error-correction
+    sample_weights[mask_cat4] = 0.5  # repaired
+    # Cat 2: weight = 0 (default)
+
+    print(f"MSE median={mse_median.item():.4f}, PCC median={pcc_median.item():.4f}")
+    print(f"Cat 3 (good action + normal image):   {mask_cat3.sum().item()} samples, weight=1.0")
+    print(f"Cat 1 (good action + abnormal image): {mask_cat1.sum().item()} samples, weight=0.5")
+    print(f"Cat 4 (repaired steer + normal image): {mask_cat4.sum().item()} samples, weight=0.5")
+    print(f"Cat 2 (discarded):                    {mask_cat2.sum().item()} samples, weight=0")
     print(f"Sample weights: min={sample_weights.min().item():.4f}, max={sample_weights.max().item():.4f}, mean={sample_weights.mean().item():.4f}")
 
     #-----------------------------------------------
@@ -209,10 +173,11 @@ if __name__ == "__main__":
         pickle.dump({
             'image': images.detach().cpu().numpy(),
             'steer': steers.detach().cpu().numpy().reshape(-1),
+            'cleaned_steer': cleaned_steers.detach().cpu().numpy().reshape(-1),
             'mse': mse.detach().cpu().numpy(),
             'pcc': pcc.detach().cpu().numpy(),
-            'mse_confidence': mse_confidence.detach().cpu().numpy(),
-            'pcc_confidence': pcc_confidence.detach().cpu().numpy(),
+            'quadrant': np.array(['cat3' if m3 else 'cat1' if m1 else 'cat4' if m4 else 'cat2'
+                                  for m3, m1, m4 in zip(mask_cat3.cpu(), mask_cat1.cpu(), mask_cat4.cpu())]),
             'weights': sample_weights.detach().cpu().numpy()
         }, f)
 
@@ -232,7 +197,7 @@ if __name__ == "__main__":
     for train_loss, val_loss in cnn_controller.train(
         cnn_model,
         images,
-        steers,
+        cleaned_steers,
         device,
         weights=sample_weights,
         **cnn_train_config

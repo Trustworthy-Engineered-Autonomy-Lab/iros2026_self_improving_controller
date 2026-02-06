@@ -59,6 +59,27 @@ DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 RESULT_FOLDER = "cae_%Y_%m_%d_%H_%M_%S"
 LAMBDA = 1
     
+def predict(
+        model: nn.Module,
+        images: torch.Tensor,
+        device = DEVICE,
+        batch_size = BATCH_SIZE
+    ):
+
+    images = images.to(device, torch.float32)
+
+    dataset = TensorDataset(images)
+    loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
+
+    model.eval()
+    pred_list = []
+    with torch.no_grad():
+        for (image,) in loader:
+            pred_steer, _ = model(image)
+            pred_list.append(pred_steer.squeeze(-1))
+
+    return torch.cat(pred_list)
+
 def eval(
         model: nn.Module,
         images : torch.Tensor,
@@ -74,7 +95,7 @@ def eval(
     val_loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
 
     criterion = nn.MSELoss(reduction='none')
-    
+
     model.eval()
     loss_list = []
     with torch.no_grad():
