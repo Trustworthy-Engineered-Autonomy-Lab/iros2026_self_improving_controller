@@ -30,13 +30,13 @@ class SteerEncoder(nn.Sequential):
     def __init__(self):
         super().__init__(
             nn.Linear(1, 16),
-            nn.LeakyReLU(),
+            nn.ReLU(),
             nn.Linear(16, 64),
-            nn.LeakyReLU(),
+            nn.ReLU(),
             nn.Linear(64, 128),
-            nn.LeakyReLU(),
+            nn.ReLU(),
             nn.Linear(128, 256),
-            nn.Tanh()
+            nn.ReLU()
         )
     
 class CAESteer(nn.Module):
