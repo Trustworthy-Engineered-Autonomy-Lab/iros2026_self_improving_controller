@@ -97,12 +97,6 @@ if __name__ == "__main__":
 
     rc, mse = cae.eval(cae_model, normalized_images, device)
 
-    with open(result_folder / 'rc_record.pkl', 'wb') as f:
-        pickle.dump(rc, f)
-
-    with open(result_folder / 'mse_record.pkl', 'wb') as f:
-        pickle.dump(mse, f)
-
     rc_threshold = cae_config.get('rc_threshold', RC_THRESHOLD)
     if isinstance(rc_threshold, str):
         rc_threshold = eval(rc_threshold, {}, {'mean' : torch.mean(rc), 'stdev': torch.std(rc)})
@@ -111,6 +105,7 @@ if __name__ == "__main__":
     selected = torch.where(rc >= rc_threshold)[0]
 
     n_removed = images.shape[0] - len(selected)
+    cae_victims = torch.where(rc < rc_threshold)[0]
 
     critic_images = images[selected]
     critic_steers = steers[selected]
@@ -138,6 +133,7 @@ if __name__ == "__main__":
 
     critic_threshold = critic_config.get('threshold', CRITIC_THRESHOLD)
     selected = torch.where(critic_score >= critic_threshold)[0]
+    critic_victims = torch.where(critic_score < critic_threshold)[0]
 
     n_removed = images.shape[0] - len(selected)
 
@@ -146,13 +142,25 @@ if __name__ == "__main__":
 
     print(f"Removed {n_removed} images whose critic score < {critic_threshold:.2f}")
 
-    with open(result_folder / 'cleaned_data.pkl', 'wb') as f:
+    cleaned_data_path = result_folder / 'cleaned_data.pkl'
+    with open(cleaned_data_path, 'wb') as f:
         pickle.dump({
             'image' : images.detach().cpu().numpy(),
             'steer': steers.detach().cpu().numpy().reshape(-1)
         }, f)
 
-    print(f"Saved cleaned data {result_folder / 'cleaned_data.pkl'}")
+    print(f"Saved cleaned data as {cleaned_data_path}")
+
+    record_path = result_folder / 'evolve_record.pkl'
+    with open(record_path, 'wb') as f:
+        pickle.dump({
+            'critic_victims' : critic_victims.detach().cpu().numpy(),
+            'cae_victims' : cae_victims.detach().cpu().numpy(),
+            'rc_record' : rc.detach().cpu().numpy(),
+            'mse_record' : mse.detach().cpu().numpy()
+        }, f)
+
+    print(f"Saved record as {record_path}")
         
     #-----------------------------------------------
 
