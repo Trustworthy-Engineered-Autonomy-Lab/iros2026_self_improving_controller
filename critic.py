@@ -181,14 +181,27 @@ def train(
 
     model = model.to(device)
 
-    real_dataset = CriticDataset(images, steers, False, **dataset_config)
-    fake_dataset = ConcatDataset([CriticDataset(images, steers, True, **dataset_config)] * fake_times)
+    n_images = images.shape[0]
+    indices = torch.randperm(n_images)
+    train_indices = indices[:int(0.8 * n_images)]
+    val_indices = indices[int(0.8 * n_images):]
 
-    real_train_dataset, real_val_dataset = _split_dataset(real_dataset, 0.8)
-    fake_train_dataset, fake_val_dataset = _split_dataset(fake_dataset, 0.8)
+    train_real = CriticDataset(images[train_indices], steers[train_indices], fake=False, **dataset_config)
+    train_fake = ConcatDataset([
+        CriticDataset(images[train_indices], steers[train_indices], fake=True, **dataset_config)
+        for _ in range(fake_times)
+    ])
 
-    train_dataset = ConcatDataset([real_train_dataset, fake_train_dataset])
-    val_dataset = ConcatDataset([real_val_dataset, fake_val_dataset])
+    val_real = CriticDataset(images[val_indices], steers[val_indices], fake=False, **dataset_config)
+    val_fake = ConcatDataset([
+        CriticDataset(images[val_indices], steers[val_indices], fake=True, **dataset_config)
+        for _ in range(fake_times)
+    ])
+
+
+    train_dataset = ConcatDataset([train_real, train_fake])
+    val_dataset = ConcatDataset([val_real, val_fake])
+
 
     train_dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
     val_dataloader = DataLoader(val_dataset, batch_size=batch_size)
