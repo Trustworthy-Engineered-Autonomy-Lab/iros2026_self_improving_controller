@@ -156,11 +156,6 @@ def val_epoch(
     avg_loss = total_loss / len(dataloader)
     return avg_loss
 
-def _split_dataset(dataset: Dataset, ratio = 0.8):
-    train_size = int(ratio * len(dataset))
-    val_size   = len(dataset) - train_size
-    return random_split(dataset, [train_size, val_size])
-    
 def train(
         model: nn.Module,
         images: torch.Tensor,
