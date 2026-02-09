@@ -157,7 +157,8 @@ if __name__ == "__main__":
             'critic_victims' : critic_victims.detach().cpu().numpy(),
             'cae_victims' : cae_victims.detach().cpu().numpy(),
             'rc_record' : rc.detach().cpu().numpy(),
-            'mse_record' : mse.detach().cpu().numpy()
+            'mse_record' : mse.detach().cpu().numpy(),
+            'critic_record' : critic_score.detach().cpu().numpy() 
         }, f)
 
     print(f"Saved record as {record_path}")

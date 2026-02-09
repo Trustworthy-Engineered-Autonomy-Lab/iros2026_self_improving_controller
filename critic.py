@@ -1,6 +1,6 @@
 import torch
 from torch import nn
-from torch.utils.data import Dataset, DataLoader, random_split
+from torch.utils.data import Dataset, ConcatDataset, DataLoader, random_split
 import numpy as np
 
 import argparse
@@ -19,17 +19,20 @@ WEIGHT_DECAY = 1e-5
 NUM_EPOCHS = 100
 RESULT_FOLDER = "critic_%Y_%m_%d_%H_%M_%S"
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
+FAKE_TIMES = 1
 
 
 class CriticDataset(Dataset):
     RAMP_TURN_POINT = 0.2
-    def __init__(self, images, steers, expand_times = 1, label_scheme = 'binary', **kwargs):
+    def __init__(self, images, steers, fake = False, label_scheme = 'binary', **kwargs):
         super().__init__()
         self._images = images
-        rand_steers = torch.rand(steers.shape[0] * expand_times, 1, device=steers.device)
-        real_steers = steers.repeat(expand_times + 1, *([1] * (steers.dim() - 1)))
-        self._steers = torch.concatenate([steers, rand_steers])
-        self._labels = self._make_label(real_steers, self._steers, label_scheme, **kwargs)
+        if fake:
+            self._steers = torch.rand_like(steers) * 2 - 1
+            self._labels = self._make_label(steers, self._steers, label_scheme, **kwargs)
+        else:
+            self._steers = steers
+            self._labels = torch.ones_like(steers)
 
     def _make_label(self, steer, real_steer, label_scheme = 'binary', **kwargs):
         if label_scheme == 'binary':
@@ -49,8 +52,7 @@ class CriticDataset(Dataset):
     
     def __getitem__(self, index):
 
-        real_len = self._images.shape[0]
-        image = self._images[index % real_len]
+        image = self._images[index]
         steer = self._steers[index]
         label = self._labels[index]
         
@@ -69,7 +71,7 @@ class Critic(nn.Module):
     def __init__(self):
         super().__init__()
 
-        self.features = nn.Sequential(
+        self.cnn = nn.Sequential(
             nn.Conv2d(3, 24, kernel_size=5, stride=2),
             nn.ReLU(inplace=True),
 
@@ -87,19 +89,20 @@ class Critic(nn.Module):
         )
 
         # For input 3x144x224 → conv stack → 64x11x21
-        self.flatten_dim = 64 * 11 * 21 + 1
-
-        self.classifier = nn.Sequential(
-            nn.Linear(self.flatten_dim, 100),
+        self.linear = nn.Sequential(
+            nn.Flatten(),
+            nn.Linear(64 * 11 * 21, 100),
             nn.ReLU(inplace=True),
 
             nn.Linear(100, 50),
             nn.ReLU(inplace=True),
 
-            nn.Linear(50, 10),
+            nn.Linear(50, 20),
             nn.ReLU(inplace=True),
+        )
 
-            nn.Linear(10, 1),
+        self.classifier = nn.Sequential(
+            nn.Linear(20 + 1, 1),
             nn.Sigmoid()
         )
 
@@ -109,8 +112,8 @@ class Critic(nn.Module):
         x1 = x1 / 255.0
         x1 = x1 * 2.0 - 1.0
 
-        x1 = self.features(x1)
-        x1 = x1.reshape(x1.size(0), -1)
+        x1 = self.cnn(x1)
+        x1 = self.linear(x1)
         x = torch.cat([x1, x2], dim=1)
         return self.classifier(x)
     
@@ -152,6 +155,11 @@ def val_epoch(
 
     avg_loss = total_loss / len(dataloader)
     return avg_loss
+
+def _split_dataset(dataset: Dataset, ratio = 0.8):
+    train_size = int(ratio * len(dataset))
+    val_size   = len(dataset) - train_size
+    return random_split(dataset, [train_size, val_size])
     
 def train(
         model: nn.Module,
@@ -162,6 +170,7 @@ def train(
         nepochs = NUM_EPOCHS,
         lr = LEARNING_RATE,
         weight_decay = WEIGHT_DECAY,
+        fake_times = FAKE_TIMES,
         dataset_config = {}
     ):
 
@@ -172,10 +181,14 @@ def train(
 
     model = model.to(device)
 
-    dataset = CriticDataset(images, steers, **dataset_config)
-    train_size = int(0.8 * len(dataset))
-    val_size   = len(dataset) - train_size
-    train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
+    real_dataset = CriticDataset(images, steers, False, **dataset_config)
+    fake_dataset = ConcatDataset([CriticDataset(images, steers, True, **dataset_config)] * fake_times)
+
+    real_train_dataset, real_val_dataset = _split_dataset(real_dataset, 0.8)
+    fake_train_dataset, fake_val_dataset = _split_dataset(fake_dataset, 0.8)
+
+    train_dataset = ConcatDataset([real_train_dataset, fake_train_dataset])
+    val_dataset = ConcatDataset([real_val_dataset, fake_val_dataset])
 
     train_dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
     val_dataloader = DataLoader(val_dataset, batch_size=batch_size)
