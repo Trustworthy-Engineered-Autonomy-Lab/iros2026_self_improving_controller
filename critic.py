@@ -86,12 +86,12 @@ class Critic(nn.Module):
 
             nn.Conv2d(64, 64, kernel_size=3, stride=1),
             nn.ReLU(inplace=True),
+            nn.Flatten(),
         )
 
         # For input 3x144x224 → conv stack → 64x11x21
         self.linear = nn.Sequential(
-            nn.Flatten(),
-            nn.Linear(64 * 11 * 21, 100),
+            nn.Linear(64 * 11 * 21 + 1, 100),
             nn.ReLU(inplace=True),
 
             nn.Linear(100, 50),
@@ -99,10 +99,8 @@ class Critic(nn.Module):
 
             nn.Linear(50, 20),
             nn.ReLU(inplace=True),
-        )
 
-        self.classifier = nn.Sequential(
-            nn.Linear(20 + 1, 1),
+            nn.Linear(20, 1),
             nn.Sigmoid()
         )
 
@@ -113,9 +111,8 @@ class Critic(nn.Module):
         x1 = x1 * 2.0 - 1.0
 
         x1 = self.cnn(x1)
-        x1 = self.linear(x1)
         x = torch.cat([x1, x2], dim=1)
-        return self.classifier(x)
+        return self.linear(x)
     
 def train_epoch(
         model: nn.Module,
