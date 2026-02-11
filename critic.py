@@ -20,6 +20,13 @@ NUM_EPOCHS = 100
 RESULT_FOLDER = "critic_%Y_%m_%d_%H_%M_%S"
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
 
+class WeightedMSELoss(nn.MSELoss):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def __call__(self, *args, **kwds):
+        loss = super().__call__(*args, **kwds)
+        pass
 
 class CriticDataset(Dataset):
     RAMP_TURN_POINT = 0.2
@@ -162,7 +169,8 @@ def train(
         nepochs = NUM_EPOCHS,
         lr = LEARNING_RATE,
         weight_decay = WEIGHT_DECAY,
-        dataset_config = {}
+        dataset_config = {},
+        loss = 'mse'
     ):
 
     device = torch.device(device)
@@ -180,7 +188,11 @@ def train(
     train_dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
     val_dataloader = DataLoader(val_dataset, batch_size=batch_size)
 
-    criterion = nn.MSELoss(reduction='none')  
+    if loss == 'mse':
+        criterion = nn.MSELoss(reduction='none')
+    elif loss == 'weighted_mse':
+        criterion = WeightedMSELoss(reduction='none')
+
     optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
 
     epochs = range(1, nepochs+1)
