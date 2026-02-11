@@ -7,7 +7,7 @@ import pickle
 import torch
 import numpy as np
 
-from utils import proc_collected_data
+from utils import load_data, construct_data
 from tools.pt2onnx import export_onnx
 
 import cae
@@ -45,21 +45,9 @@ if __name__ == "__main__":
     image_list = []
     steer_list = []
     try:
-        data_config = config['data']
-        for k,v in data_config.items():
-            data_path = Path(k)
-            print(f"Loading {data_path}")
-            if data_path.is_dir():
-                data = proc_collected_data(data_path)
-            elif data_path.suffix == '.pkl':
-                with open(data_path, 'rb') as f:
-                    data = pickle.load(f)
-            else:
-                print(f"Unrecognized data format {data_path.suffix}. Ignored {data_path}")
-                continue
-                
-            image_list.append(data['image'][slice(*v)])
-            steer_list.append(data['steer'][slice(*v)].reshape(-1,1))
+        data_config = config['load_data']
+        data = load_data(data_config)
+        training_data = construct_data(data, config.get('training_data', {}))
     except Exception as e:
         print(f"Failed to process collected data under {config['collected_data']}: {e}")
         sys.exit(1)
@@ -74,8 +62,8 @@ if __name__ == "__main__":
     result_folder = Path(datetime.now().strftime(config.get('result_folder', RESULT_FOLDER)))
     result_folder.mkdir(parents=True, exist_ok=True)
 
-    images = torch.from_numpy(np.concatenate(image_list)).to(device, torch.float32)
-    steers = torch.from_numpy(np.concatenate(steer_list)).to(device, torch.float32)
+    images = torch.from_numpy(training_data['image']).to(device, torch.float32)
+    steers = torch.from_numpy(training_data['steer']).to(device, torch.float32)
 
     print(f"Loaded {images.shape[0]} image - steer pairs")
 
