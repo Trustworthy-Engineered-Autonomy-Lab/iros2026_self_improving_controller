@@ -10,16 +10,15 @@ import numpy as np
 from utils import proc_collected_data
 from tools.pt2onnx import export_onnx
 
-import cae
-from cae import CAE, normalize_image
-import critic
-from critic import Critic
+import cae_with_action
+from cae_with_action import CAE, normalize_image
 import cnn_controller
 from cnn_controller import CNN
 
 from utils import EarlyStopCriterion
 
 from datetime import datetime
+from scipy.ndimage import median_filter
 
 
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -61,7 +60,7 @@ if __name__ == "__main__":
             image_list.append(data['image'][slice(*v)])
             steer_list.append(data['steer'][slice(*v)].reshape(-1,1))
     except Exception as e:
-        print(f"Failed to process collected data under {config['collected_data']}: {e}")
+        print(f"Failed to process collected data: {e}")
         sys.exit(1)
 
     DEVICE = config.get('device', DEVICE)
@@ -87,15 +86,19 @@ if __name__ == "__main__":
 
     normalized_images = normalize_image(images).permute(0,3,1,2)
 
-    for loss in cae.train(
+    for loss in cae_with_action.train(
         cae_model,
         normalized_images,
+        steers,
         device,
         **cae_train_config
     ):
         pass
 
-    rc, mse = cae.eval(cae_model, normalized_images, device)
+    rc, mse = cae_with_action.eval(cae_model, normalized_images, steers, device)
+
+    kernel_size = cae_config.get('kernel_size', 50)
+    rc = torch.from_numpy(median_filter(rc.detach().cpu().numpy(), kernel_size)).to(device)
 
     rc_threshold = cae_config.get('rc_threshold', RC_THRESHOLD)
     if isinstance(rc_threshold, str):
@@ -107,40 +110,12 @@ if __name__ == "__main__":
     n_removed = images.shape[0] - len(selected)
     cae_victims = torch.where(rc < rc_threshold)[0]
 
-    critic_images = images[selected]
-    critic_steers = steers[selected]
+    images = images[selected]
+    steers = steers[selected]
 
     print(f"Removed {n_removed} images whose rc value < {rc_threshold:.2f} for critic")
 
     #-----------------------------------------------
-
-    critic_config = config.get('critic', {})
-    critic_train_config = critic_config.get('train', {})
-
-    critic_model = Critic().to(device)
-
-    for loss in critic.train(
-        critic_model,
-        critic_images,
-        critic_steers,
-        device,
-        **critic_train_config
-    ):
-        pass
-    
-    critic_model.eval()
-    critic_score = critic_model(images, steers)
-
-    critic_threshold = critic_config.get('threshold', CRITIC_THRESHOLD)
-    selected = torch.where(critic_score >= critic_threshold)[0]
-    critic_victims = torch.where(critic_score < critic_threshold)[0]
-
-    n_removed = images.shape[0] - len(selected)
-
-    images = images[selected]
-    steers = steers[selected]
-
-    print(f"Removed {n_removed} images whose critic score < {critic_threshold:.2f}")
 
     cleaned_data_path = result_folder / 'cleaned_data.pkl'
     with open(cleaned_data_path, 'wb') as f:
@@ -154,7 +129,6 @@ if __name__ == "__main__":
     record_path = result_folder / 'evolve_record.pkl'
     with open(record_path, 'wb') as f:
         pickle.dump({
-            'critic_victims' : critic_victims.detach().cpu().numpy(),
             'cae_victims' : cae_victims.detach().cpu().numpy(),
             'rc_record' : rc.detach().cpu().numpy(),
             'mse_record' : mse.detach().cpu().numpy()
